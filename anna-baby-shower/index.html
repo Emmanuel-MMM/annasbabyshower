@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Google Sheets Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        #chart-container {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            min-height: 600px;
+            position: relative;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+        }
+        .status {
+            text-align: right;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <button id="refresh-btn">Force Refresh Now</button>
+            <div>
+                Auto-refresh: 
+                <select id="refresh-interval">
+                    <option value="2000">2 sec</option>
+                    <option value="5000" selected>5 sec</option>
+                    <option value="10000">10 sec</option>
+                    <option value="30000">30 sec</option>
+                    <option value="0">Off</option>
+                </select>
+            </div>
+        </div>
+        <div id="chart-container">
+            <div class="loading">Initializing live data connection...</div>
+        </div>
+        <div class="status" id="status">
+            Loading initial data...
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const CONFIG = {
+            chartUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSyX_zE4dKe2XU15BtFoQXvI_T4tOPNkfEK1GUCtRVbr-7OnUrIgQIlG5q6aU3IwFNhRp-E74r813wx/pubchart?oid=1064922099&format=interactive",
+            refreshInterval: 5000,
+            maxRetries: 3,
+            retryDelay: 2000
+        };
+
+        // State
+        let refreshTimer;
+        let retryCount = 0;
+
+        // DOM Elements
+        const chartContainer = document.getElementById('chart-container');
+        const statusElement = document.getElementById('status');
+        const refreshBtn = document.getElementById('refresh-btn');
+        const intervalSelect = document.getElementById('refresh-interval');
+
+        // Cache-busting function with multiple parameters
+        function getCacheBustedUrl() {
+            const params = new URLSearchParams();
+            params.append('ts', Date.now());
+            params.append('rand', Math.random().toString(36).substring(2, 15));
+            return `${CONFIG.chartUrl}&${params.toString()}`;
+        }
+
+        // Create a completely new iframe with fresh data
+        function loadFreshChart() {
+            return new Promise((resolve, reject) => {
+                // Clear previous content
+                chartContainer.innerHTML = '<div class="loading">Loading fresh data...</div>';
+                
+                // Create new iframe
+                const iframe = document.createElement('iframe');
+                iframe.width = "100%";
+                iframe.height = "600";
+                iframe.frameBorder = "0";
+                iframe.src = getCacheBustedUrl();
+                
+                iframe.onload = function() {
+                    updateStatus(`Data loaded at ${new Date().toLocaleTimeString()}`);
+                    retryCount = 0; // Reset retry counter
+                    resolve();
+                };
+                
+                iframe.onerror = function() {
+                    reject(new Error('Failed to load chart'));
+                };
+                
+                // Replace container content
+                chartContainer.innerHTML = '';
+                chartContainer.appendChild(iframe);
+            });
+        }
+
+        // Handle refresh with retry logic
+        async function refreshChart() {
+            try {
+                await loadFreshChart();
+            } catch (error) {
+                retryCount++;
+                if (retryCount <= CONFIG.maxRetries) {
+                    updateStatus(`Error loading (retry ${retryCount}/${CONFIG.maxRetries})...`);
+                    setTimeout(refreshChart, CONFIG.retryDelay);
+                } else {
+                    updateStatus("Failed to load after multiple attempts", true);
+                }
+            }
+        }
+
+        // Update status message
+        function updateStatus(message, isError = false) {
+            statusElement.textContent = message;
+            statusElement.style.color = isError ? 'red' : '#666';
+        }
+
+        // Initialize the page
+        async function init() {
+            // Set up manual refresh button
+            refreshBtn.addEventListener('click', () => {
+                if (refreshTimer) clearInterval(refreshTimer);
+                refreshChart();
+                if (CONFIG.refreshInterval > 0) {
+                    startAutoRefresh();
+                }
+            });
+
+            // Set up interval selector
+            intervalSelect.value = CONFIG.refreshInterval;
+            intervalSelect.addEventListener('change', (e) => {
+                CONFIG.refreshInterval = parseInt(e.target.value);
+                if (refreshTimer) clearInterval(refreshTimer);
+                if (CONFIG.refreshInterval > 0) {
+                    startAutoRefresh();
+                }
+            });
+
+            // Initial load
+            await refreshChart();
+            
+            // Start auto-refresh
+            if (CONFIG.refreshInterval > 0) {
+                startAutoRefresh();
+            }
+        }
+
+        // Start auto-refresh timer
+        function startAutoRefresh() {
+            refreshTimer = setInterval(refreshChart, CONFIG.refreshInterval);
+            updateStatus(`Auto-refreshing every ${CONFIG.refreshInterval/1000} seconds`);
+        }
+
+        // Additional cache prevention
+        window.addEventListener('pageshow', (event) => {
+            if (event.persisted) {
+                window.location.reload();
+            }
+        });
+
+        // Start the application
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
